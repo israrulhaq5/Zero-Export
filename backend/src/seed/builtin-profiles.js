@@ -5,6 +5,7 @@ const { EM500_PROFILE } = require('./em500.profile');
 const { HUAWEI_SUN2000_PROFILE } = require('./huawei-sun2000.profile');
 const { SOLIS_PROFILE } = require('./solis-inverter.profile');
 const { SUNGROW_PROFILE } = require('./sungrow-inverter.profile');
+const { EXTENDED_INVERTER_PROFILES } = require('./extended-inverter-profiles');
 const RegisterProfileRepository = require('../repositories/register-profile.repository');
 
 /**
@@ -16,7 +17,13 @@ const RegisterProfileRepository = require('../repositories/register-profile.repo
  * Operator-created profiles and built-in profiles at the current version are
  * never touched, so local edits are preserved between releases.
  */
-const BUILTIN_PROFILES = Object.freeze([EM500_PROFILE, HUAWEI_SUN2000_PROFILE, SOLIS_PROFILE, SUNGROW_PROFILE]);
+const BUILTIN_PROFILES = Object.freeze([
+  EM500_PROFILE,
+  HUAWEI_SUN2000_PROFILE,
+  SOLIS_PROFILE,
+  SUNGROW_PROFILE,
+  ...EXTENDED_INVERTER_PROFILES,
+]);
 
 function profileVersionOf(profile) {
   return profile?.metadata?.profileVersion ?? 0;

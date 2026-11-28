@@ -5,6 +5,7 @@ const logger = require('../config/logger');
 const { REGISTER_TYPES } = require('../constants/modbus');
 const { encodeRegister } = require('../modbus/register-encoder');
 const { decodeRegister } = require('../modbus/register-decoder');
+const { createGenericInverterModel, computeGenericInverter, applyGenericInverterWrite } = require('./generic-inverter');
 
 const SIMULATOR_STATES = Object.freeze({
   STOPPED: 'STOPPED',
@@ -138,6 +139,7 @@ class SimulatorDevice {
     this.startedAt = null;
 
     for (const register of profile.registers) {
+      if (register.enabled === false) continue;
       this.definitionsByAddress.set(this.addressKey(register.registerType, register.address), register);
       if (register.writable) {
         this.writableDefinitions.set(this.addressKey(register.registerType, register.address), register);
@@ -149,6 +151,9 @@ class SimulatorDevice {
   }
 
   createModel() {
+    if (this.profile?.metadata?.simulator?.genericInverter === true) {
+      return createGenericInverterModel(this.profile);
+    }
     if (this.deviceType === 'Sungrow inverter') {
       return {
         manufacturer: 'Sungrow',
@@ -438,6 +443,11 @@ class SimulatorDevice {
     const decoded = decodeRegister(definition, [...rawValues]);
     this.controlValues.set(definition.key, decoded.value);
 
+    if (this.model?.genericInverter === true) {
+      applyGenericInverterWrite(this, definition, decoded.value);
+      return rawValues;
+    }
+
     if (definition.key === 'active_power_derating') {
       this.model.deratingRaw = Math.round(decoded.value / 0.1);
     }
@@ -481,8 +491,9 @@ class SimulatorDevice {
   /** Recompute simulated values and refresh the raw register memory. */
   tick() {
     const now = new Date();
-    const values =
-      this.deviceType === 'Huawei SUN2000 inverter'
+    const values = this.model?.genericInverter === true
+      ? computeGenericInverter(this)
+      : this.deviceType === 'Huawei SUN2000 inverter'
         ? this.computeHuawei()
         : this.deviceType === 'Solis inverter'
           ? this.computeSolis()
@@ -491,6 +502,7 @@ class SimulatorDevice {
             : this.computeEm500();
 
     for (const register of this.profile.registers) {
+      if (register.enabled === false) continue;
       let engineeringValue = values[register.key];
 
       if (engineeringValue === undefined) {
@@ -538,11 +550,16 @@ class SimulatorDevice {
   defaultCoupledInverterKw() {
     try {
       const { getDevice } = require('../simulator');
-      const keys = ['huawei', 'solis', 'sungrow'];
+      const keys = ['huawei', 'solis', 'sungrow', 'sofar', 'growatt', 'deye', 'foxess', 'goodwe', 'esinv'];
       let total = 0;
       for (const key of keys) {
         const inverter = getDevice(key);
         if (!inverter || inverter.getStatus().state !== 'RUNNING') continue;
+        const model = inverter.model;
+        if (model?.genericInverter === true) {
+          total += Math.max(0, Number(model.lastOutputKw) || 0);
+          continue;
+        }
         const value = inverter.values.get('active_power');
         if (value) {
           // Huawei publishes kW; Solis and Sungrow publish W (scale 1).
@@ -552,7 +569,6 @@ class SimulatorDevice {
           continue;
         }
         // Fallback: deterministic model output before the first published tick.
-        const model = inverter.model;
         if (!model || model.deratingRaw === undefined) continue;
         const ratingKw = inverter.configuration.options?.ratingKw ?? 100;
         const availabilityPct = inverter.configuration.options?.availabilityPct ?? 100;

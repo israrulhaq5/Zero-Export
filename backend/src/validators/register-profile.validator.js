@@ -129,7 +129,7 @@ const createRegisterProfileBodySchema = z
     description: optionalText,
     manufacturer: z.string().trim().min(1).max(120).nullable().optional(),
     model: z.string().trim().min(1).max(120).nullable().optional(),
-    registers: z.array(registerDefinitionSchema).min(1).max(500).superRefine((registers, context) => {
+    registers: z.array(registerDefinitionSchema).min(1).max(3000).superRefine((registers, context) => {
       const keys = new Set();
       registers.forEach((register, index) => {
         const key = register.key.toLowerCase();
@@ -182,7 +182,7 @@ const updateRegisterProfileBodySchema = z
     description: optionalText,
     manufacturer: z.string().trim().min(1).max(120).nullable().optional(),
     model: z.string().trim().min(1).max(120).nullable().optional(),
-    registers: z.array(registerDefinitionSchema).min(1).max(500).optional(),
+    registers: z.array(registerDefinitionSchema).min(1).max(3000).optional(),
     isActive: z.boolean().optional(),
     maxReadQuantity: z.number().int().min(1).max(125).optional(),
     tags: tagsSchema.optional(),

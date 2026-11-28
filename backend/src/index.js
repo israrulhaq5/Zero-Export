@@ -13,6 +13,7 @@ const { zeroExportService } = require('./services/zero-export.service');
 const { ensureBuiltinProfiles } = require('./seed/builtin-profiles');
 const { startAll, stopAll, applyPersistedSettings } = require('./simulator');
 const SimulatorSettingsRepository = require('./repositories/simulator-settings.repository');
+const DeviceRepository = require('./repositories/device.repository');
 
 let server;
 let shuttingDown = false;
@@ -71,7 +72,7 @@ async function bootstrap() {
   if (config.simulator.autoStart) {
     try {
       // Persisted simulator settings (port, unit ID, options) win over defaults.
-      await applyPersistedSettings(new SimulatorSettingsRepository());
+      await applyPersistedSettings(new SimulatorSettingsRepository(), new DeviceRepository());
       const status = await startAll();
       logger.info('Device simulators started', {
         em500: status.devices.em500.state,

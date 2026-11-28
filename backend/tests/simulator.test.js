@@ -188,17 +188,69 @@ test('simulator manager exposes every device and their values', async () => {
   assert.equal(getValues('huawei').length, 0);
   assert.equal(getValues('solis').length, 0);
   assert.equal(getValues('unknown').length, 0);
-  assert.equal(simulatorDevices.huawei.getStatus().port, 15021);
-  assert.equal(simulatorDevices.huawei.getStatus().unitId, 2);
-  assert.equal(simulatorDevices.em500.getStatus().port, 15020);
+  for (const key of ['em500', 'huawei', 'solis', 'sungrow']) {
+    assert.equal(simulatorDevices[key].getStatus().port, 502, `${key} uses the shared Modbus TCP port`);
+  }
   assert.equal(simulatorDevices.em500.getStatus().unitId, 1);
+  assert.equal(simulatorDevices.huawei.getStatus().unitId, 2);
   assert.equal(simulatorDevices.huawei.getStatus().deviceType, 'Huawei SUN2000 inverter');
-  assert.equal(simulatorDevices.solis.getStatus().port, 15022);
   assert.equal(simulatorDevices.solis.getStatus().unitId, 3);
   assert.equal(simulatorDevices.solis.getStatus().deviceType, 'Solis inverter');
-  assert.equal(simulatorDevices.sungrow.getStatus().port, 15023);
   assert.equal(simulatorDevices.sungrow.getStatus().unitId, 4);
   assert.equal(simulatorDevices.sungrow.getStatus().deviceType, 'Sungrow inverter');
+});
+
+test('legacy simulator ports migrate to shared Modbus TCP 502 and linked EMS devices sync', async () => {
+  const { applyPersistedSettings, simulatorDevices } = require('../src/simulator');
+  const keys = ['em500', 'huawei', 'solis', 'sungrow'];
+  const legacyPorts = { em500: 15020, huawei: 15021, solis: 15022, sungrow: 15023 };
+  const saved = {};
+  const linked = {};
+  const savedWrites = {};
+  const linkedWrites = {};
+
+  for (const key of keys) {
+    const status = simulatorDevices[key].getStatus();
+    saved[key] = {
+      port: legacyPorts[key],
+      unitId: status.unitId,
+      updateIntervalMs: status.updateIntervalMs,
+      options: status.options,
+    };
+    linked[`${key}-simulator`] = {
+      _id: key,
+      identifier: `${key}-simulator`,
+      unitId: status.unitId + 10,
+      connection: { protocol: 'TCP', host: '127.0.0.1', port: legacyPorts[key] },
+    };
+  }
+
+  const settingsRepository = {
+    get: async (key) => saved[key] || null,
+    save: async (key, settings) => {
+      savedWrites[key] = settings;
+      saved[key] = settings;
+      return settings;
+    },
+  };
+  const deviceRepository = {
+    findOne: async ({ identifier }) => linked[identifier] || null,
+    updateById: async (id, patch) => {
+      linkedWrites[id] = patch;
+      return { ...linked[id + '-simulator'], ...patch };
+    },
+  };
+
+  const results = await applyPersistedSettings(settingsRepository, deviceRepository);
+
+  for (const key of keys) {
+    assert.equal(simulatorDevices[key].getStatus().port, 502);
+    assert.equal(savedWrites[key].port, 502, `${key} persisted port migrated`);
+    assert.equal(linkedWrites[key].connection.port, 502, `${key} linked EMS port synchronized`);
+    assert.equal(linkedWrites[key].unitId, simulatorDevices[key].getStatus().unitId);
+  }
+  assert.equal(results.filter((result) => result.migratedPort).length, 4);
+  assert.equal(results.filter((result) => result.linkedDeviceSynced).length, 4);
 });
 
 test('Solis simulator serves FC04 inputs and accepts active power limit writes', async () => {
@@ -407,6 +459,11 @@ test('devices on the same port are served by unit ID (shared vector)', async () 
   );
 
   await em500.instance.stop();
+  assert.throws(
+    () => vector.getMultipleHoldingRegisters(0x0002, 2, 1),
+    (error) => error.modbusErrorCode === 0x0b,
+    'a stopped device on a shared port must not serve stale registers',
+  );
   await solis.instance.stop();
 });
 
@@ -525,5 +582,5 @@ test('simulator settings update syncs the linked EMS device unit ID and port', a
   assert.equal(updatedPatch.connection.port, 15024);
   // restore defaults
   await require('../src/simulator').stopDevice('sungrow');
-  simulatorDevices.sungrow.configure({ host: '0.0.0.0', port: 15023, unitId: 4, updateIntervalMs: 1000 });
+  simulatorDevices.sungrow.configure({ host: '0.0.0.0', port: 502, unitId: 4, updateIntervalMs: 1000 });
 });
